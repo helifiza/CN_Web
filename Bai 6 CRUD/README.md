@@ -1,7 +1,5 @@
 # Bài 6 — React CRUD: Quản lý người dùng
 
-Ứng dụng theo bài thực hành `Ex. React-CRUD - 20261.pdf`, dùng React 18, ReactDOM và Babel qua CDN. Không cần cài npm hoặc build.
-
 ## Chạy ứng dụng
 
 Mở `index.html` bằng trình duyệt hoặc chọn **Open with Live Server** trong VS Code. Cần Internet để tải thư viện và dữ liệu mẫu lần đầu.
