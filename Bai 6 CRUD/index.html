@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Bài thực hành React CRUD: tìm kiếm, thêm, sửa và xóa người dùng." />
+  <title>Quản lý người dùng | React CRUD</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232567eb'/%3E%3Ccircle cx='32' cy='23' r='10' fill='white'/%3E%3Cpath d='M14 51a18 18 0 0 1 36 0' fill='white'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous" defer></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous" defer></script>
+  <script src="https://unpkg.com/@babel/standalone@7.28.5/babel.min.js" defer></script>
+</head>
+<body>
+  <div id="root">
+    <div class="boot-screen">
+      <h1>Quản lý người dùng</h1>
+      <p>Đang khởi động ứng dụng React…</p>
+      <p>Cần kết nối Internet để tải thư viện. Nếu chờ quá lâu, hãy kiểm tra mạng và tải lại trang.</p>
+    </div>
+  </div>
+  <noscript>Bạn cần bật JavaScript để sử dụng ứng dụng.</noscript>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef } = React;
+    const API_URL = 'https://jsonplaceholder.typicode.com/users';
+    const STORAGE_KEY = 'it4409-react-crud-users-v1';
+
+    function emptyUser() {
+      return {
+        name: '', username: '', email: '', phone: '', website: '',
+        address: { street: '', suite: '', city: '' },
+      };
+    }
+
+    // Chuẩn hóa dữ liệu để các trường trong form luôn có giá trị chuỗi.
+    function normalizeUser(user) {
+      const text = (value) => typeof value === 'string' ? value : '';
+      return {
+        ...user,
+        name: text(user.name), username: text(user.username),
+        email: text(user.email), phone: text(user.phone), website: text(user.website),
+        address: {
+          ...user.address,
+          street: text(user.address?.street),
+          suite: text(user.address?.suite),
+          city: text(user.address?.city),
+        },
+      };
+    }
+
+    function validUsers(data) {
+      return Array.isArray(data) && data.every((user) =>
+        user && Number.isSafeInteger(user.id) && user.id > 0 &&
+        typeof user.name === 'string' && typeof user.username === 'string'
+      ) && new Set(data.map((user) => user.id)).size === data.length;
+    }
+
+    // Tìm kiếm không phân biệt hoa/thường và dấu tiếng Việt.
+    function searchText(value) {
+      return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().trim();
+    }
+
+    function websiteUrl(value) {
+      if (!value.trim()) return null;
+      try {
+        const url = new URL(/^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`);
+        return ['http:', 'https:'].includes(url.protocol) && url.hostname.includes('.')
+          ? url.href : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function Icon({ name, size = 20, ...props }) {
+      const paths = {
+        users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /><circle cx="9" cy="7" r="4" /></>,
+        search: <><circle cx="10.5" cy="10.5" r="7.5" /><path d="m16 16 5 5" /></>,
+        plus: <path d="M12 5v14M5 12h14" />,
+        edit: <><path d="m16 3 5 5M4 20l4-1L21 6a2.12 2.12 0 0 0-3-3L5 16z" /><path d="M13 21h8" /></>,
+        trash: <><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" /></>,
+        close: <path d="m6 6 12 12M6 18 18 6" />,
+        check: <path d="m5 12 4 4L19 6" />,
+        info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></>,
+        globe: <><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18" /></>,
+      };
+      return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>{paths[name]}</svg>;
+    }
+
+    function SearchForm({ keyword, onChangeValue, disabled }) {
+      return (
+        <div className="search-box">
+          <Icon name="search" />
+          <label className="sr-only" htmlFor="search">Tìm kiếm người dùng</label>
+          <input id="search" type="search" value={keyword} disabled={disabled}
+            placeholder="Tìm theo họ tên hoặc username…"
+            onChange={(event) => onChangeValue(event.target.value)} />
+        </div>
+      );
+    }
+
+    function FormField({ id, label, value, onChange, error, required = false, ...props }) {
+      return (
+        <div className="form-field">
+          <label htmlFor={id}>{label}{required && <span className="required"> *</span>}</label>
+          <input id={id} name={id} value={value} onChange={onChange} required={required}
+            aria-invalid={Boolean(error)} aria-describedby={error ? `${id}-error` : undefined} {...props} />
+          {error && <span id={`${id}-error`} className="field-error">{error}</span>}
+        </div>
+      );
+    }
+
+    // Form dùng chung cho thêm/sửa. Bản nháp có address riêng, Hủy không thay đổi bảng.
+    function UserForm({ initialUser, users, onSave, onClose }) {
+      const [user, setUser] = useState(() => ({ ...initialUser, address: { ...initialUser.address } }));
+      const [errors, setErrors] = useState({});
+      const dialogRef = useRef(null);
+      const isEditing = initialUser.id != null;
+
+      useEffect(() => {
+        const dialog = dialogRef.current;
+        const previousFocus = document.activeElement;
+        const previousOverflow = document.body.style.overflow;
+        dialog.showModal();
+        document.body.style.overflow = 'hidden';
+        dialog.querySelector('input').focus();
+        return () => {
+          dialog.close();
+          document.body.style.overflow = previousOverflow;
+          previousFocus?.focus();
+        };
+      }, []);
+
+      function handleChange(event) {
+        const { name, value } = event.target;
+        setUser((previous) => ['street', 'suite', 'city'].includes(name)
+          ? { ...previous, address: { ...previous.address, [name]: value } }
+          : { ...previous, [name]: value });
+        setErrors((previous) => ({ ...previous, [name]: '' }));
+      }
+
+      function handleSubmit(event) {
+        event.preventDefault();
+        const cleaned = {
+          ...user,
+          name: user.name.trim(), username: user.username.trim(), email: user.email.trim(),
+          phone: user.phone.trim(), website: user.website.trim(),
+          address: {
+            ...user.address,
+            street: user.address.street.trim(), suite: user.address.suite.trim(), city: user.address.city.trim(),
+          },
+        };
+        const nextErrors = {};
+        if (!cleaned.name) nextErrors.name = 'Vui lòng nhập họ và tên.';
+        if (!cleaned.username) nextErrors.username = 'Vui lòng nhập tên đăng nhập.';
+        else if (/\s/.test(cleaned.username)) nextErrors.username = 'Tên đăng nhập không được chứa khoảng trắng.';
+        else if (users.some((item) => item.id !== user.id && item.username.toLowerCase() === cleaned.username.toLowerCase())) {
+          nextErrors.username = 'Tên đăng nhập này đã tồn tại.';
+        }
+        if (cleaned.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned.email)) {
+          nextErrors.email = 'Vui lòng nhập email hợp lệ.';
+        }
+        if (cleaned.website && !websiteUrl(cleaned.website)) {
+          nextErrors.website = 'Nhập tên miền hoặc đường dẫn http/https hợp lệ.';
+        }
+        setErrors(nextErrors);
+        if (Object.keys(nextErrors).length) {
+          dialogRef.current.querySelector(`[name="${Object.keys(nextErrors)[0]}"]`).focus();
+          return;
+        }
+        onSave(cleaned);
+      }
+
+      return (
+        <dialog className="user-dialog" ref={dialogRef} aria-labelledby="form-title"
+          onCancel={(event) => { event.preventDefault(); onClose(); }}>
+          <div className="dialog-heading">
+            <div><p className="eyebrow">THÔNG TIN NGƯỜI DÙNG</p><h2 id="form-title">{isEditing ? 'Chỉnh sửa người dùng' : 'Thêm người dùng'}</h2></div>
+            <button className="icon-button" type="button" aria-label="Đóng biểu mẫu" onClick={onClose}><Icon name="close" /></button>
+          </div>
+          <form onSubmit={handleSubmit} noValidate>
+            <div className="dialog-body">
+              <p className="form-note">Các trường có dấu <span className="required">*</span> là bắt buộc.</p>
+              <div className="form-grid">
+                <FormField id="name" label="Họ và tên" value={user.name} onChange={handleChange} error={errors.name} required maxLength={100} autoComplete="name" placeholder="Nguyễn Minh Anh" />
+                <FormField id="username" label="Tên đăng nhập" value={user.username} onChange={handleChange} error={errors.username} required maxLength={60} autoComplete="off" placeholder="minhanh" />
+                <FormField id="email" label="Email" type="email" value={user.email} onChange={handleChange} error={errors.email} maxLength={254} autoComplete="email" placeholder="minhanh@example.com" />
+                <FormField id="phone" label="Số điện thoại" type="tel" value={user.phone} onChange={handleChange} maxLength={50} autoComplete="tel" placeholder="0912 345 678" />
+              </div>
+              <fieldset>
+                <legend>Địa chỉ</legend>
+                <div className="form-grid">
+                  <FormField id="street" label="Đường / phố" value={user.address.street} onChange={handleChange} maxLength={150} placeholder="Đường Đại Cồ Việt" />
+                  <FormField id="suite" label="Số nhà / căn hộ" value={user.address.suite} onChange={handleChange} maxLength={100} placeholder="Số 1" />
+                  <FormField id="city" label="Thành phố" value={user.address.city} onChange={handleChange} maxLength={100} autoComplete="address-level2" placeholder="Hà Nội" />
+                  <FormField id="website" label="Website" value={user.website} onChange={handleChange} error={errors.website} maxLength={500} placeholder="example.com" />
+                </div>
+              </fieldset>
+            </div>
+            <div className="dialog-footer">
+              <button className="button button-secondary" type="button" onClick={onClose}>Hủy</button>
+              <button className="button button-primary" type="submit"><Icon name={isEditing ? 'check' : 'plus'} />{isEditing ? 'Lưu thay đổi' : 'Thêm người dùng'}</button>
+            </div>
+          </form>
+        </dialog>
+      );
+    }
+
+    function AddUser({ users, onAdd, disabled }) {
+      const [adding, setAdding] = useState(false);
+      return <>
+        <button className="button button-primary" onClick={() => setAdding(true)} disabled={disabled}><Icon name="plus" />Thêm người dùng</button>
+        {adding && <UserForm initialUser={emptyUser()} users={users} onClose={() => setAdding(false)}
+          onSave={(user) => { onAdd(user); setAdding(false); }} />}
+      </>;
+    }
+
+    function ResultTable({ users, keyword, onEdit, onDelete, onClearSearch }) {
+      const query = searchText(keyword);
+      const filteredUsers = users.filter((user) =>
+        searchText(user.name).includes(query) || searchText(user.username).includes(query));
+
+      return <>
+        {filteredUsers.length > 0 ? (
+          <div className="table-scroll" role="region" aria-label="Bảng người dùng, cuộn ngang để xem đầy đủ" tabIndex="0">
+            <table>
+              <caption className="sr-only">Danh sách người dùng và thao tác chỉnh sửa, xóa</caption>
+              <thead><tr>
+                <th scope="col">ID</th><th scope="col">Người dùng</th><th scope="col">Email</th>
+                <th scope="col">Địa chỉ</th><th scope="col">Điện thoại</th><th scope="col">Website</th><th scope="col">Thao tác</th>
+              </tr></thead>
+              <tbody>{filteredUsers.map((user) => {
+                const address = [user.address.street, user.address.suite].filter(Boolean).join(', ');
+                const url = websiteUrl(user.website);
+                const initials = user.name.trim().split(/\s+/).filter(Boolean).slice(-2).map((part) => part[0]).join('').toUpperCase();
+                return <tr key={user.id}>
+                  <td className="id-cell">{String(user.id).padStart(2, '0')}</td>
+                  <td><div className="person"><span className={`avatar avatar-${user.id % 4}`} aria-hidden="true">{initials || '?'}</span>
+                    <div><span className="person-name">{user.name}</span><span className="secondary-text">@{user.username}</span></div>
+                  </div></td>
+                  <td className="email-cell">{user.email || <span className="muted">—</span>}</td>
+                  <td className="address-cell"><span>{address || '—'}</span><span className="secondary-text">{user.address.city}</span></td>
+                  <td className="phone-cell">{user.phone || <span className="muted">—</span>}</td>
+                  <td>{url ? <a className="website-link" href={url} target="_blank" rel="noopener noreferrer">{user.website}</a> : <span className="muted">—</span>}</td>
+                  <td><div className="row-actions">
+                    <button className="row-button edit-button" onClick={() => onEdit(user)} aria-label={`Sửa ${user.name}`}><Icon name="edit" size={16} />Sửa</button>
+                    <button className="row-button delete-button" onClick={() => onDelete(user)} aria-label={`Xóa ${user.name}`}><Icon name="trash" size={16} />Xóa</button>
+                  </div></td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state">
+            <span className="empty-icon"><Icon name={query ? 'search' : 'users'} size={30} /></span>
+            <h3>{query ? 'Không tìm thấy người dùng' : 'Danh sách đang trống'}</h3>
+            <p>{query ? 'Thử tìm bằng họ tên hoặc tên đăng nhập khác.' : 'Thêm người dùng đầu tiên để bắt đầu quản lý.'}</p>
+            {query && <button className="button button-secondary" onClick={onClearSearch}>Xóa từ khóa</button>}
+          </div>
+        )}
+        <div className="table-footer" role="status"><span>Hiển thị <strong>{filteredUsers.length}</strong> / <strong>{users.length}</strong> người dùng</span><span className="table-hint">Tìm kiếm theo tên hoặc username</span></div>
+      </>;
+    }
+
+    function App() {
+      // State dùng chung ở App; các component con nhận dữ liệu và callback qua props.
+      const [users, setUsers] = useState([]);
+      const [keyword, setKeyword] = useState('');
+      const [editing, setEditing] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState('');
+      const [storageError, setStorageError] = useState('');
+      const [ready, setReady] = useState(false);
+      const [attempt, setAttempt] = useState(0);
+      const [notice, setNotice] = useState(null);
+      const nextId = useRef(1);
+
+      useEffect(() => {
+        let active = true;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+        setLoading(true);
+        setError('');
+
+        async function loadUsers() {
+          try {
+            let saved = null;
+            try {
+              const raw = localStorage.getItem(STORAGE_KEY);
+              if (raw !== null) {
+                const parsed = JSON.parse(raw);
+                if (validUsers(parsed)) saved = parsed;
+              }
+            } catch {
+              // Dữ liệu lưu hỏng hoặc bị chặn: vẫn có thể tải từ API.
+            }
+            let data = saved;
+            if (data === null) {
+              const response = await fetch(API_URL, { signal: controller.signal });
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              data = await response.json();
+              if (!validUsers(data)) throw new Error('Invalid user data');
+            }
+            if (active) {
+              setUsers(data.map(normalizeUser));
+              nextId.current = Math.max(0, ...data.map((user) => user.id)) + 1;
+              setReady(true);
+            }
+          } catch (loadError) {
+            if (active) setError(loadError.name === 'AbortError'
+              ? 'Kết nối mất quá nhiều thời gian. Vui lòng kiểm tra mạng và thử lại.'
+              : 'Không thể tải danh sách người dùng. Vui lòng kiểm tra kết nối và thử lại.');
+          } finally {
+            clearTimeout(timeout);
+            if (active) setLoading(false);
+          }
+        }
+        loadUsers();
+        return () => { active = false; clearTimeout(timeout); controller.abort(); };
+      }, [attempt]);
+
+      // Không ghi [] trước khi tải xong, tránh xóa nhầm dữ liệu đã lưu.
+      useEffect(() => {
+        if (!ready) return;
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(users));
+          setStorageError('');
+        } catch {
+          setStorageError('Trình duyệt không cho phép lưu dữ liệu. Thay đổi chỉ được giữ trong phiên hiện tại.');
+        }
+      }, [users, ready]);
+
+      useEffect(() => {
+        if (!notice) return;
+        const timer = setTimeout(() => setNotice(null), 7000);
+        return () => clearTimeout(timer);
+      }, [notice]);
+
+      function addUser(user) {
+        // Bộ đếm tăng độc lập với độ dài mảng để không trùng ID sau khi xóa.
+        const added = { ...user, id: nextId.current++ };
+        setUsers((previous) => [added, ...previous]);
+        setKeyword('');
+        setNotice({ message: `Đã thêm ${user.name}.` });
+      }
+
+      function saveUser(user) {
+        setUsers((previous) => previous.map((item) => item.id === user.id ? user : item));
+        setEditing(null);
+        setNotice({ message: `Đã cập nhật ${user.name}.` });
+      }
+
+      function removeUser(user) {
+        const index = users.findIndex((item) => item.id === user.id);
+        setUsers((previous) => previous.filter((item) => item.id !== user.id));
+        setNotice({ message: `Đã xóa ${user.name}.`, deletedUser: user, index });
+      }
+
+      function undoDelete() {
+        const { deletedUser, index } = notice;
+        setUsers((previous) => {
+          if (previous.some((user) => user.id === deletedUser.id)) return previous;
+          const restored = [...previous];
+          restored.splice(index, 0, deletedUser);
+          return restored;
+        });
+        setNotice({ message: `Đã khôi phục ${deletedUser.name}.` });
+      }
+
+      return <>
+        <header className="topbar"><div className="topbar-inner">
+          <div className="brand"><span className="brand-icon"><Icon name="users" size={22} /></span><span>Danh bạ<span className="brand-subtitle">QUẢN LÝ NGƯỜI DÙNG</span></span></div>
+          <span className="course-tag">IT4409 <span>/</span> Bài thực hành React</span>
+        </div></header>
+        <main className="page">
+          <div className="breadcrumb">Bài thực hành <span>/</span> <strong>React CRUD</strong></div>
+          <section className="page-heading" aria-labelledby="page-title">
+            <div><p className="eyebrow">KHÔNG GIAN QUẢN LÝ</p><h1 id="page-title">Quản lý người dùng<span className="title-dot">.</span></h1><p className="description">Mọi thông tin liên hệ, trong một danh sách.</p></div>
+            <div className="total-card"><span className="total-icon"><Icon name="users" size={26} /></span><div><span className="total-label">Tổng người dùng</span><strong>{loading || error ? '—' : users.length.toString().padStart(2, '0')}</strong></div></div>
+          </section>
+          {storageError && <p className="storage-warning" role="alert"><Icon name="info" />{storageError}</p>}
+          <section className="directory" aria-labelledby="list-title" aria-busy={loading}>
+            <div className="directory-heading"><div><h2 id="list-title">Danh sách người dùng</h2><p>Xem, tìm kiếm và cập nhật thông tin của bạn.</p></div><span className="section-badge">Danh bạ</span></div>
+            <div className="toolbar"><SearchForm keyword={keyword} onChangeValue={setKeyword} disabled={!ready} /><AddUser users={users} onAdd={addUser} disabled={!ready} /></div>
+            {loading ? <div className="empty-state" role="status"><span className="spinner" /><h3>Đang tải danh sách…</h3><p>Vui lòng chờ trong giây lát.</p></div>
+              : error ? <div className="empty-state" role="alert"><span className="empty-icon"><Icon name="info" size={30} /></span><h3>Chưa tải được dữ liệu</h3><p>{error}</p><button className="button button-primary" onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></div>
+              : <ResultTable users={users} keyword={keyword} onEdit={(user) => setEditing({ ...user, address: { ...user.address } })} onDelete={removeUser} onClearSearch={() => setKeyword('')} />}
+          </section>
+          <footer className="page-footer"><span><Icon name="info" size={17} />{storageError ? 'Thay đổi chỉ được giữ trong phiên hiện tại.' : 'Thay đổi được lưu trên trình duyệt này.'}</span><a href="https://jsonplaceholder.typicode.com/" target="_blank" rel="noopener noreferrer">Dữ liệu mẫu: JSONPlaceholder</a></footer>
+        </main>
+        {editing && <UserForm initialUser={editing} users={users} onSave={saveUser} onClose={() => setEditing(null)} />}
+        {notice && <div className="toast"><span className="toast-check"><Icon name="check" size={18} /></span><span role="status">{notice.message}</span>{notice.deletedUser && <button className="undo-button" onClick={undoDelete}>Hoàn tác</button>}<button className="icon-button" aria-label="Đóng thông báo" onClick={() => setNotice(null)}><Icon name="close" size={17} /></button></div>}
+      </>;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
